@@ -15,7 +15,7 @@ def init_db():
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS passwords (
             id INTEGER PRIMARY KEY,
-            service TEXT NOT NULL,
+            service TEXT UNIQUE NOT NULL,  -- UNIQUE ограничение
             username TEXT NOT NULL,
             encrypted_password TEXT NOT NULL
         )
@@ -23,29 +23,50 @@ def init_db():
     conn.commit()
     conn.close()
 
-
-# Добавление пароля
 def add_password(service, username, password, key):
     encrypted_password = encrypt_password(password, key)
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    cursor.execute("INSERT INTO passwords (service, username, encrypted_password) VALUES (?, ?, ?)",
-                   (service, username, encrypted_password))
-    conn.commit()
-    conn.close()
+    try:
+        cursor.execute("INSERT INTO passwords (service, username, encrypted_password) VALUES (?, ?, ?)",
+                       (service, username, encrypted_password))
+        conn.commit()
+    except sqlite3.IntegrityError:
+        print(f"Сервис '{service}' уже существует. Используйте редактирование.")
+    finally:
+        conn.close()
 
-
-# Получение пароля
-def get_password(service, username, key):
+def get_password(service, key):  # Убраны параметр username
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    cursor.execute("SELECT encrypted_password FROM passwords WHERE service=? AND username=?", (service, username))
+    cursor.execute("SELECT username, encrypted_password FROM passwords WHERE service=?", (service,))
     row = cursor.fetchone()
     conn.close()
     if row:
-        return decrypt_password(row[0], key)
+        return {
+            'username': row[0],
+            'password': decrypt_password(row[1], key)
+        }
     return None
 
+
+
+# Новые функции для обновления и удаления
+def update_password(service, new_password, key):
+    encrypted_password = encrypt_password(new_password, key)
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("UPDATE passwords SET encrypted_password=? WHERE service=?",
+                   (encrypted_password, service))
+    conn.commit()
+    conn.close()
+
+def delete_password(service):
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM passwords WHERE service=?", (service,))
+    conn.commit()
+    conn.close()
 
 # Бэкап базы данных
 def backup_db():
