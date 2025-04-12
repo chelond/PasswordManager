@@ -4,10 +4,11 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="0f36174e-bb7c-4b92-910a-f8efda199664" name="Changes" comment="first">
+    <list default="true" id="0f36174e-bb7c-4b92-910a-f8efda199664" name="Changes" comment="1.0 build">
       <change afterPath="$PROJECT_DIR$/usb_key_check.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.gitignore" beforeDir="false" afterPath="$PROJECT_DIR$/.gitignore" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/db.py" beforeDir="false" afterPath="$PROJECT_DIR$/db.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/manager.py" beforeDir="false" afterPath="$PROJECT_DIR$/manager.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/style.tcss" beforeDir="false" />
     </list>
@@ -61,7 +62,15 @@
       <option name="project" value="LOCAL" />
       <updated>1744106542616</updated>
     </task>
-    <option name="localTasksCounter" value="2" />
+    <task id="LOCAL-00002" summary="1.0 build">
+      <option name="closed" value="true" />
+      <created>1744489425147</created>
+      <option name="number" value="00002" />
+      <option name="presentableId" value="LOCAL-00002" />
+      <option name="project" value="LOCAL" />
+      <updated>1744489425147</updated>
+    </task>
+    <option name="localTasksCounter" value="3" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -77,6 +86,7 @@
   </component>
   <component name="VcsManagerConfiguration">
     <MESSAGE value="first" />
-    <option name="LAST_COMMIT_MESSAGE" value="first" />
+    <MESSAGE value="1.0 build" />
+    <option name="LAST_COMMIT_MESSAGE" value="1.0 build" />
   </component>
 </project>
