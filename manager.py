@@ -8,7 +8,7 @@ from rich.table import Table
 from crypto import derive_key, clear_password
 from db import init_db, add_password, get_password, backup_db, export_data, import_data, get_all_services, get_users_by_service
 
-SALT_FILE = "salt.bin"
+SALT_FILE = os.path.join(os.path.expanduser("~"), ".passman_salt.bin")
 console = Console()
 
 def get_salt():

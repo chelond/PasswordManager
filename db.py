@@ -1,10 +1,11 @@
+import os
 import sqlite3
 import json
 import shutil
 import datetime
 from crypto import encrypt_password, decrypt_password
 
-DB_PATH = "passwords.db"
+DB_PATH = os.path.join(os.path.expanduser("~"), ".passman.db")
 
 
 # Инициализация базы данных
