@@ -4,3 +4,24 @@ export.json
 salt.bin
 build
 dist
+# Файлы данных и конфигурации
+*.db
+*.bin
+passwords_backup_*.db
+
+# Директории и файлы сборки
+dist/
+build/
+*.spec
+
+# Временные файлы Python
+__pycache__/
+*.pyc
+*.pyo
+
+# IDE/редакторы
+.idea/
+.vscode/
+
+# Системные файлы
+.DS_Store
