@@ -1,296 +1,305 @@
-import os
 import getpass
+import json
+import os
 import secrets
 import string
-import pyperclip
-import time
-from rich.console import Console
+import logging
+import yaml
+from typing import Optional, Tuple, List
+
 from rich.panel import Panel
+
+from db import Database
+from crypto import Crypto
+from ui import UI
+from config import GENERATED_PASSWORD_LENGTH, CONFIG_FILE, DEFAULT_CONFIG, LOG_FILE
 from rich.progress import Progress
-from rich import box
-from questionary import select, prompt, Style
-from crypto import derive_key, clear_password
-from db import (
-    init_db, add_password, get_password, backup_db,
-    export_data, import_data, get_all_services,
-    update_password, delete_password
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    handlers=[
+        logging.FileHandler(LOG_FILE),
+        logging.StreamHandler()
+    ]
 )
-
-SALT_FILE = os.path.join(os.path.expanduser("~"), ".passman_salt.bin")
-console = Console()
-
-# Кастомный стиль для questionary
-custom_style = Style([
-    ('qmark', 'fg:#00ffff bold'),
-    ('selected', 'fg:#00ff00 bold'),
-    ('pointer', 'fg:#ff00ff bold'),
-    ('highlighted', 'fg:#ffff00 bold'),
-])
+logger = logging.getLogger(__name__)
 
 
-def get_salt():
-    if not os.path.exists(SALT_FILE):
-        salt = os.urandom(16)
-        with open(SALT_FILE, "wb") as f:
-            f.write(salt)
-    else:
-        with open(SALT_FILE, "rb") as f:
-            salt = f.read()
-    return salt
+class PasswordManager:
+    """Управляет операциями с паролями и координирует работу базы данных, шифрования и интерфейса."""
 
+    def __init__(self):
+        self.db = Database()
+        self.crypto = Crypto()
+        self.ui = UI()
+        self.db.init_db()
+        # Ensure config file exists
+        if not os.path.exists(CONFIG_FILE):
+            with open(CONFIG_FILE, "w") as f:
+                yaml.dump(DEFAULT_CONFIG, f)
 
-def get_key():
-    master_password = getpass.getpass("🔑 Введите мастер-пароль: ")
-    return derive_key(master_password, get_salt())
+    def generate_password(self, length: int = GENERATED_PASSWORD_LENGTH) -> str:
+        """Генерирует случайный безопасный пароль."""
+        chars = string.ascii_letters + string.digits + "!@#$%^&*"
+        password = ''.join(secrets.choice(chars) for _ in range(length))
+        strength = self.ui.check_password_strength(password)
+        self.ui.console.print(f"Сила сгенерированного пароля: {strength}")
+        return password
 
+    def change_master_password(self, old_key: bytes, salt: bytes) -> Tuple[bool, Optional[str]]:
+        """Меняет мастер-пароль и перешифровывает все пароли."""
+        new_password = self.ui.get_new_master_password()
+        if not new_password:
+            return False, None
 
-def generate_password(length=16):
-    chars = string.ascii_letters + string.digits + "!@#$%^&*"
-    return ''.join(secrets.choice(chars) for _ in range(length))
+        # Generate new key
+        new_key = self.crypto.derive_key(new_password, salt)
 
+        # Re-encrypt all passwords
+        with self.db.connect() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT service, username, encrypted_password, category FROM passwords")
+            entries = cursor.fetchall()
 
-def check_password_strength(password):
-    if len(password) < 8:
-        return "слабый"
-    elif not (any(c.isupper() for c in password) and any(c.isdigit() for c in password)):
-        return "средний"
-    return "сильный"
-
-
-def print_banner():
-    banner = """
-    ██████╗  █████╗ ███████╗███████╗███╗   ███╗ █████╗ ███╗   ██╗
-    ██╔══██╗██╔══██╗██╔════╝██╔════╝████╗ ████║██╔══██╗████╗  ██║
-    ██████╔╝███████║███████╗███████╗██╔████╔██║███████║██╔██╗ ██║
-    ██╔═══╝ ██╔══██║╚════██║╚════██║██║╚██╔╝██║██╔══██║██║╚██╗██║
-    ██║     ██║  ██║███████║███████║██║ ╚═╝ ██║██║  ██║██║ ╚████║
-    ╚═╝     ╚═╝  ╚═╝╚══════╝╚══════╝╚═╝     ╚═╝╚═╝  ╚═╝╚═╝  ╚═══╝
-    """
-    console.print(Panel.fit(
-        f"[bold cyan]{banner}[/bold cyan]",
-        border_style="bright_yellow",
-        padding=(1, 4),
-        subtitle="[blink]v2.2[/blink] [white]Secure Password Management[/white]"
-    ))
-
-
-def animated_loading(text="Загрузка..."):
-    with Progress(transient=True) as progress:
-        task = progress.add_task(f"[cyan]{text}", total=10)
-        while not progress.finished:
-            progress.update(task, advance=0.5)
-            time.sleep(0.04)
-
-
-def print_info():
-    info_text = """
-    [bold cyan]Password Manager v2.2[/bold cyan]
-    🔒 Безопасное хранение паролей с военным уровнем шифрования
-
-    [bold yellow]Основные возможности:[/bold yellow]
-    • Навигация стрелками
-    • AES-256-GCM шифрование
-    • Интерактивные формы ввода
-    • Генератор сложных паролей
-    • Автоматическое копирование в буфер
-
-    [bold green]Управление:[/bold green]
-    ↑/↓ - Выбор пункта
-    Enter - Подтвердить
-    Ctrl+C - Выход
-    """
-    console.print(Panel.fit(info_text, title="ℹ️ Информация", border_style="cyan"))
-
-
-def main_menu():
-    return select(
-        message="Выберите действие:",
-        choices=[
-            {"name": "🗝  Добавить пароль", "value": "1"},
-            {"name": "🔍  Получить пароль", "value": "2"},
-            {"name": "🎲  Сгенерировать пароль", "value": "3"},
-            {"name": "✏️  Редактировать запись", "value": "4"},
-            {"name": "🗑️  Удалить запись", "value": "5"},
-            {"name": "💾 Бэкап данных", "value": "6"},
-            {"name": "📤 Экспорт данных", "value": "7"},
-            {"name": "📥 Импорт данных", "value": "8"},
-            {"name": "ℹ️  Информация", "value": "9"},
-            {"name": "🚪 Выход", "value": "0"}
-        ],
-        qmark="➤",
-        style=custom_style,
-        use_arrow_keys=True
-    )
-
-
-def interactive_manager():
-    print_banner()
-    animated_loading("Инициализация системы...")
-    init_db()
-    key = get_key()
-
-    while True:
-        action = main_menu().ask()
-
-        if action == "1":
-            answers = prompt([
-                {
-                    'type': 'text',
-                    'name': 'service',
-                    'message': '🌐 Введите название сервиса:',
-                    'qmark': '➤',
-                    'style': custom_style
-                },
-                {
-                    'type': 'text',
-                    'name': 'username',
-                    'message': '👤 Введите имя пользователя:',
-                    'qmark': '➤',
-                    'style': custom_style
-                },
-                {
-                    'type': 'password',
-                    'name': 'password',
-                    'message': '🔒 Введите пароль:',
-                    'qmark': '➤',
-                    'style': custom_style
-                }
-            ], style=custom_style)
-
-            strength = check_password_strength(answers['password'])
-            console.print(
-                f"🛡️ Уровень защиты: [bold {'red' if strength == 'слабый' else 'yellow' if strength == 'средний' else 'green'}]{strength.upper()}[/]")
-
-            with console.status("[bold green]Шифрование данных...[/]", spinner="bouncingBall"):
-                add_password(answers['service'], answers['username'], answers['password'], key)
-                clear_password(answers['password'])
-                time.sleep(1)
-            console.print(Panel.fit("✅ [bold green]Запись успешно сохранена![/]", border_style="green"))
-
-        elif action == "2":
-            services = get_all_services()
-            if not services:
-                console.print(Panel("[red]⚠️ Нет сохранённых сервисов[/red]", border_style="red"))
-                continue
-
-            selected_service = select(
-                message="📋 Выберите сервис:",
-                choices=services,
-                style=custom_style,
-                use_arrow_keys=True,
-                qmark="➤"
-            ).ask()
-
-            with console.status("[cyan]Поиск записи...[/]", spinner="dots"):
-                result = get_password(selected_service, key)
-                time.sleep(0.5)
-
-            if result:
-                pyperclip.copy(result['password'].decode())
-                console.print(
-                    Panel.fit(
-                        f"🔑 [bold green]{selected_service}[/]\n"
-                        f"👤 Логин: [yellow]{result['username']}[/]\n"
-                        f"📋 Пароль скопирован в буфер!",
-                        border_style="green"
+            for service, username, encrypted_password, category in entries:
+                try:
+                    # Decrypt with old key
+                    password = self.crypto.decrypt_password(encrypted_password, old_key)
+                    # Encrypt with new key
+                    new_encrypted_password = self.crypto.encrypt_password(password, new_key)
+                    # Update database
+                    cursor.execute(
+                        "UPDATE passwords SET encrypted_password=? WHERE service=? AND (category=? OR category IS NULL)",
+                        (new_encrypted_password, service, category)
                     )
+                except Exception as e:
+                    self.ui.display_error(f"Не удалось перешифровать {service}: {e}")
+                    return False, None
+
+            conn.commit()
+
+        # Save new master password hash
+        self.crypto.save_master_hash(new_password, salt)
+        self.ui.display_success("🔄 [green]Мастер-пароль изменен![/green]")
+        return True, new_password
+
+    def get_services_and_metadata(self, category: str = None) -> Tuple[List[str], List[str], List[str]]:
+        """Получает список сервисов, имен пользователей и категорий."""
+        with self.db.connect() as conn:
+            cursor = conn.cursor()
+            if category:
+                cursor.execute(
+                    "SELECT service, username, category FROM passwords WHERE category=?",
+                    (category,)
                 )
-                clear_password(result['password'])
             else:
-                console.print(Panel("[red]⚠️ Запись не найдена[/red]", border_style="red"))
+                cursor.execute("SELECT service, username, category FROM passwords")
+            rows = cursor.fetchall()
+            services = [row[0] for row in rows]
+            usernames = [row[1] for row in rows]
+            categories = [row[2] for row in rows]
+            return services, usernames, categories
 
-        elif action == "3":
-            answers = prompt([
-                {
-                    'type': 'text',
-                    'name': 'service',
-                    'message': '🌐 Введите название сервиса:',
-                    'qmark': '➤',
-                    'style': custom_style
-                },
-                {
-                    'type': 'text',
-                    'name': 'username',
-                    'message': '👤 Введите имя пользователя:',
-                    'qmark': '➤',
-                    'style': custom_style
-                }
-            ], style=custom_style)
+    def run(self):
+        """Запускает основной цикл приложения."""
+        self.ui.print_banner()
+        self.ui.animated_loading("Инициализация системы безопасности...")
 
-            password = generate_password()
-            with console.status("[yellow]Генерация пароля...[/]", spinner="dots12"):
-                add_password(answers['service'], answers['username'], password, key)
-                pyperclip.copy(password)
-                time.sleep(1)
+        salt = self.crypto.get_salt()
+        max_attempts = 3
+        attempts = 0
 
-            console.print(
-                Panel.fit(
-                    f"🔢 [bold]{password}[/]\n"
-                    f"📋 Пароль скопирован в буфер!",
-                    title="🎉 Новый пароль",
-                    border_style="yellow"
-                )
-            )
-            clear_password(password)
+        while attempts < max_attempts:
+            try:
+                master_password = getpass.getpass(self.ui.messages["enter_master_password"])
+                if not master_password.strip():
+                    raise ValueError("Мастер-пароль не может быть пустым")
 
-        elif action == "4":
-            service = select(
-                message="🌐 Выберите сервис для редактирования:",
-                choices=get_all_services(),
-                style=custom_style,
-                use_arrow_keys=True,
-                qmark="➤"
-            ).ask()
+                # Verify master password
+                if not self.crypto.verify_master_password(master_password, salt):
+                    attempts += 1
+                    remaining = max_attempts - attempts
+                    self.ui.display_error(
+                        f"{self.ui.messages['invalid_master_password']} Осталось попыток: {remaining}")
+                    if remaining == 0:
+                        self.ui.display_error("Слишком много неудачных попыток")
+                        return
+                    continue
 
-            new_password = prompt([{
-                'type': 'password',
-                'name': 'password',
-                'message': '🔒 Введите новый пароль:',
-                'qmark': '➤',
-                'style': custom_style
-            }], style=custom_style)['password']
+                key = self.crypto.derive_key(master_password, salt)
+                break
+            except Exception as e:
+                self.ui.display_error(str(e))
+                return
 
-            with console.status("[blue]Обновление записи...[/]", spinner="toggle"):
-                update_password(service, new_password, key)
-                time.sleep(1)
-            console.print(Panel.fit("✅ [bold green]Пароль успешно обновлён[/]", border_style="green"))
-            clear_password(new_password)
+        while True:
+            action = self.ui.get_action()
+            try:
+                # Select category for relevant actions
+                category = None
+                if action in ["get_password", "edit_password", "delete_password"]:
+                    categories = self.db.get_all_categories()
+                    category = self.ui.select_category(categories)
+                    if category == "Без категории":
+                        category = None
 
-        elif action == "5":
-            service = select(
-                message="🌐 Выберите сервис для удаления:",
-                choices=get_all_services(),
-                style=custom_style,
-                use_arrow_keys=True,
-                qmark="➤"
-            ).ask()
+                if action == "add_password":
+                    data = self.ui.get_password_data()
+                    if not data:
+                        continue
+                    encrypted_password = self.crypto.encrypt_password(data["password"], key)
+                    category = data["category"] if data["category"] else None
+                    if self.db.add_password(data["service"], data["username"], encrypted_password, category):
+                        self.ui.display_success(self.ui.messages["saved_success"])
+                    else:
+                        self.ui.display_error(f"Сервис '{data['service']}' уже существует в категории")
 
-            with console.status("[red]Удаление...[/]", spinner="bouncingBar"):
-                delete_password(service)
-                time.sleep(0.7)
-            console.print(Panel.fit("🗑️ [bold red]Запись удалена[/]", border_style="red"))
+                elif action == "get_password":
+                    services, usernames, categories = self.get_services_and_metadata(category)
+                    service = self.ui.select_service(services, usernames, categories)
+                    if not service:
+                        continue
+                    while True:
+                        sub_action = self.ui.service_menu(service)
+                        if sub_action == "back":
+                            break
+                        elif sub_action == "view":
+                            result = self.db.get_password(service, category)
+                            if result:
+                                try:
+                                    password = self.crypto.decrypt_password(result["encrypted_password"], key)
+                                    self.ui.display_password(service, result["username"], password, category)
+                                except Exception as e:
+                                    self.ui.display_error(f"Не удалось расшифровать: вероятно, неверный мастер-пароль")
+                            else:
+                                self.ui.display_error(self.ui.messages["not_found"])
+                        elif sub_action == "edit":
+                            data = self.ui.get_password_data()
+                            if not data:
+                                continue
+                            encrypted_password = self.crypto.encrypt_password(data["password"], key)
+                            if self.db.update_password(service, encrypted_password, category):
+                                self.ui.display_success(self.ui.messages["saved_success"])
+                            else:
+                                self.ui.display_error(f"Сервис '{service}' не найден")
+                        elif sub_action == "delete":
+                            if self.ui.confirm_action(f"🗑️ Удалить {service}?"):
+                                if self.db.delete_password(service, category):
+                                    self.ui.display_success(f"🗑️ [green]{service} удален![/green]")
+                                    break
+                                else:
+                                    self.ui.display_error(f"Сервис '{service}' не найден")
 
-        elif action == "6":
-            with console.status("[magenta]Создание бэкапа...[/]", spinner="moon"):
-                backup_db()
-                time.sleep(1)
-            console.print(Panel.fit("💾 [bold green]Бэкап успешно создан[/]", border_style="green"))
+                elif action == "generate_password":
+                    data = self.ui.get_password_data(generate=True)
+                    if not data:
+                        continue
+                    password = self.generate_password()
+                    encrypted_password = self.crypto.encrypt_password(password, key)
+                    category = data["category"] if data["category"] else None
+                    if self.db.add_password(data["service"], data["username"], encrypted_password, category):
+                        self.ui.display_password(data["service"], data["username"], password, category)
+                    else:
+                        self.ui.display_error(f"Сервис '{data['service']}' уже существует в категории")
 
-        elif action == "7":
-            export_data()
-            console.print(Panel.fit("📤 [bold green]Данные экспортированы в export.json[/]", border_style="green"))
+                elif action == "edit_password":
+                    services, usernames, categories = self.get_services_and_metadata(category)
+                    service = self.ui.select_service(services, usernames, categories)
+                    if not service:
+                        continue
+                    data = self.ui.get_password_data()
+                    if not data:
+                        continue
+                    encrypted_password = self.crypto.encrypt_password(data["password"], key)
+                    if self.db.update_password(service, encrypted_password, category):
+                        self.ui.display_success(self.ui.messages["saved_success"])
+                    else:
+                        self.ui.display_error(f"Сервис '{service}' не найден")
 
-        elif action == "8":
-            import_data()
-            console.print(Panel.fit("📥 [bold green]Данные успешно импортированы[/]", border_style="green"))
+                elif action == "delete_password":
+                    services, usernames, categories = self.get_services_and_metadata(category)
+                    service = self.ui.select_service(services, usernames, categories)
+                    if not service:
+                        continue
+                    if self.ui.confirm_action(f"🗑️ Удалить {service}?"):
+                        if self.db.delete_password(service, category):
+                            self.ui.display_success(f"🗑️ [green]{service} удален![/green]")
+                        else:
+                            self.ui.display_error(f"Сервис '{service}' не найден")
 
-        elif action == "9":
-            print_info()
+                elif action == "backup_data":
+                    backup_file = self.db.backup_db()
+                    self.ui.display_success(self.ui.messages["backup_success"].format(file=backup_file))
 
-        elif action == "0":
-            console.print(Panel.fit("[bold magenta]👋 До новых встреч![/]", border_style="magenta"))
-            break
+                elif action == "export_data":
+                    export_file = self.db.export_data()
+                    self.ui.display_success(self.ui.messages["export_success"].format(file=export_file))
+
+                elif action == "import_data":
+                    with open("export.json", "r") as f:
+                        data = json.load(f)
+                    with Progress() as progress:
+                        task = progress.add_task("[cyan]Импорт данных...", total=len(data))
+                        with self.db.connect() as conn:
+                            cursor = conn.cursor()
+                            for entry in data:
+                                cursor.execute(
+                                    "INSERT OR IGNORE INTO passwords (service, username, encrypted_password, category) VALUES (?, ?, ?, ?)",
+                                    (entry["service"], entry["username"], entry["encrypted_password"],
+                                     entry.get("category"))
+                                )
+                                progress.update(task, advance=1)
+                            conn.commit()
+                    self.ui.display_success(self.ui.messages["import_success"].format(file="export.json"))
+
+                elif action == "info":
+                    self.ui.console.print(Panel.fit(
+                        "[bold cyan]Менеджер паролей v3.0[/bold cyan]\n\n"
+                        "🔒 [bold green]Возможности:[/bold green]\n"
+                        "- Шифрование AES-256-GCM\n"
+                        "- Генератор безопасных паролей\n"
+                        "- Полное управление базой данных\n"
+                        "- Резервное копирование и экспорт/импорт\n"
+                        "- Поддержка категорий\n\n"
+                        "⚠️ [bold red]Опасные операции:[/bold red]\n"
+                        "- Удаление всех данных\n"
+                        "- Пересоздание базы данных",
+                        title="ℹ️ Информация",
+                        border_style="cyan"
+                    ))
+
+                elif action == "delete_all":
+                    if self.ui.confirm_action(self.ui.messages["confirm_delete_all"]):
+                        if self.db.delete_db():
+                            self.ui.display_success("🔥 [red]Все данные удалены![/red]")
+                        else:
+                            self.ui.display_error("Не удалось удалить базу данных")
+
+                elif action == "new_db":
+                    if self.ui.confirm_action(self.ui.messages["confirm_new_db"]):
+                        self.db.delete_db()
+                        self.db.init_db()
+                        self.ui.display_success("🆕 [green]Новая база данных создана![/green]")
+
+                elif action == "change_master_password":
+                    success, new_password = self.change_master_password(key, salt)
+                    if success and new_password:
+                        key = self.crypto.derive_key(new_password, salt)
+                        logger.info("Мастер-пароль успешно изменен")
+                        new_password = " " * len(new_password)  # Очистка памяти
+
+                elif action == "exit":
+                    self.ui.display_success(self.ui.messages["goodbye"])
+                    break
+
+            except Exception as e:
+                self.ui.display_error(str(e))
+                logger.error(f"Ошибка в действии {action}: {e}")
+
+        self.db.close()
 
 
 if __name__ == "__main__":
-    interactive_manager()
+    manager = PasswordManager()
+    manager.run()

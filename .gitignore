@@ -4,6 +4,7 @@ export.json
 salt.bin
 build
 dist
+build.sh
 # Файлы данных и конфигурации
 *.db
 *.bin
