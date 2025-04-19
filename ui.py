@@ -78,7 +78,7 @@ class UI:
             f"[bold cyan]{banner}[/bold cyan]",
             border_style="bright_yellow",
             padding=(1, 4),
-            subtitle="[blink]v2.0[/blink] [white]Ультимативный Менеджер Паролей[/white]"
+            subtitle="[blink]v3.0[/blink] [white]Ультимативный Менеджер Паролей[/white]"
         ))
 
     def animated_loading(self, text: str = "Загрузка...", enabled: bool = True):

@@ -1,3 +1,4 @@
+altgraph==0.17.4
 argon2-cffi==23.1.0
 argon2-cffi-bindings==21.2.0
 cffi==1.17.1
@@ -6,11 +7,19 @@ linkify-it-py==2.0.3
 markdown-it-py==3.0.0
 mdit-py-plugins==0.4.2
 mdurl==0.1.2
+packaging==24.2
 platformdirs==4.3.7
+prompt_toolkit==3.0.50
 pycparser==2.22
 Pygments==2.19.1
+pyinstaller==6.12.0
+pyinstaller-hooks-contrib==2025.2
 pyperclip==1.9.0
+PyYAML==6.0.2
+questionary==2.1.0
 rich==14.0.0
+setuptools==78.1.0
 textual==3.0.1
 typing_extensions==4.13.1
 uc-micro-py==1.0.3
+wcwidth==0.2.13
