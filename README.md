@@ -130,11 +130,3 @@ If the application fails to start:
 4. Push to the repository: `git push origin feature/your-feature`.
 5. Create a Pull Request.
 
-## License
-
-Distributed under the MIT License. See [LICENSE](LICENSE) for details.
-
-## Contact
-
-- GitHub: [your-repo](https://github.com/your-repo)
-- Issues: [github.com/your-repo/issues](https://github.com/your-repo/issues)
